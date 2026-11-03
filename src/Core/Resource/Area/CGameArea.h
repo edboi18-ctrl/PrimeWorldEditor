@@ -26,6 +26,7 @@ class CGameArea : public CResource
     DECLARE_RESOURCE_TYPE(Area)
     friend class CAreaLoader;
     friend class CAreaCooker;
+    friend struct SGameAreaTestAccess;  // tests/: sets the original sections
 
     uint32_t mWorldIndex = UINT32_MAX;
     uint32_t mVertexCount = 0;
@@ -67,7 +68,26 @@ class CGameArea : public CResource
     std::vector<CAssetID> mExtraAreaDeps;
     std::vector< std::vector<CAssetID> > mExtraLayerDeps;
 
+    // Written by CAreaCooker in place of the original sections (Echoes only): world geometry from
+    // CWorldGeometryCooker (materials through the ambient light table) and collision for
+    // CCollisionCooker. Replacing the geometry also clears the room's visibility (PVS) and static
+    // geometry map (EGMC), which index the old surfaces; mClearPathOnCook clears PATH too.
+    std::vector<std::vector<uint8_t>> mReplacementGeometrySections;
+    uint32_t mReplacementWorldModelCount = 0;
+    std::unique_ptr<CCollisionMesh> mpReplacementCollision;
+    bool mClearPathOnCook = false;
+
 public:
+    void ReplaceWorldGeometry(std::vector<std::vector<uint8_t>> Sections, uint32_t ModelCount)
+    {
+        mReplacementGeometrySections = std::move(Sections);
+        mReplacementWorldModelCount = ModelCount;
+    }
+    void ReplaceCollision(std::unique_ptr<CCollisionMesh> pMesh) { mpReplacementCollision = std::move(pMesh); }
+    void SetClearPathOnCook(bool Clear) { mClearPathOnCook = Clear; }
+    bool HasReplacedWorldGeometry() const { return !mReplacementGeometrySections.empty(); }
+    bool HasReplacedCollision() const { return mpReplacementCollision != nullptr; }
+
     explicit CGameArea(CResourceEntry *pEntry = nullptr);
     ~CGameArea() override;
     std::unique_ptr<CDependencyTree> BuildDependencyTree() override;

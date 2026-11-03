@@ -17,10 +17,10 @@ order:
 | Section | What the game does with it | Smallest valid content | PWE today |
 |---|---|---|---|
 | Header | transform, world model count, layer count, section numbers | required | writes it |
-| World materials | the material set every world model uses | required | loads; `CMaterialCooker::WriteCookedMatSet` has an Echoes path |
-| World models, per model: header (visor flags, transform, bounds), positions, normals, colours, UVs, packed UVs, surface offsets, the surfaces, two surface tables | `FillInStaticGeometry`, `CMetroidModelInstance` | at least one model | loads them and re-splits them for display; **no writer** |
-| Render octree | built only if the header's index is not -1 | omitted (-1) | - |
-| Area surface list (`SAreaSurface`: bounds, model, surface group) and ambient light IDs | `FillInStaticGeometry` | required | skipped on load; **no writer** |
+| World materials | the material set every world model uses | required | loads; **writer takes a cooked set** (a room's own, for now) |
+| World models, per model: header (flags, transform, bounds), positions, normals, colours, UVs, packed UVs, surface offsets, the surfaces, two surface tables | `FillInStaticGeometry`, `CMetroidModelInstance` | at least one model | loads them and re-splits them for display; **writer added** (`CWorldGeometryCooker`) |
+| Render octree (AROT) | built only if the header's index is not -1, but the renderer's light setup uses it unchecked and `FillInStaticGeometry` reads the area surface list right after it | **required** | **writer added** |
+| Area surface list (`SAreaSurface`: bounds, model, surface group) and ambient light IDs | `FillInStaticGeometry`, the renderer's lights and visibility | required | **writer added** |
 | Script layers, generated objects (SCGN) | the room's script objects | required | writes them |
 | Collision | `CAreaOctTree::MakeFromMemory` | required | **writer added** (`CCollisionCooker`, below) |
 | BSP tree | `CAreaBspTree` reads 8 bytes and keeps nothing | 8 bytes | copies |
@@ -30,8 +30,8 @@ order:
 | Dependencies, modules | resources and REL modules the room needs | required | writes them |
 
 A first custom room therefore needs: world materials, one or more world models with their surface
-tables, the area surface list, collision, an 8-byte BSP section, an empty light list, and the script
-layers PWE already writes. Pathfinding (PATH) can come later. Without it, enemies that walk or fly by
+tables, a render octree, the area surface list, collision, an 8-byte BSP section, an empty light list,
+and the script layers PWE already writes. Pathfinding (PATH) can come later. Without it, enemies that walk or fly by
 path have nowhere to go.
 
 ## Collision (done)
@@ -81,14 +81,66 @@ To check the rules on retail data, the port's MCP server has `echoes_disc_room_c
 room off your disc and reports whether Retro's collision follows them (edge slots, neighbours, where the
 flipped bit sits) along with its octree's shape and material flags (port `docs/MCP_WORKSHOP.md`).
 
+## World geometry (done)
+
+`src/Core/Resource/Cooker/CWorldGeometryCooker.*` writes every section from the world materials to the
+ambient light table, from models given as arrays (positions, normals, colours, UVs, lightmap UVs) and
+surfaces (a material and three corners per triangle, each corner an index per array). The material set
+is a cooked one (a room's own first section, for now); the writer reads each material's flags and
+vertex description from it, so every vertex carries exactly the indices that material draws with.
+
+What the game requires, and where each rule comes from (port source):
+
+- **Section order per model**: header, positions, normals, colours, float UVs, packed UVs, the surface
+  count, one section per surface, surface records, surface groups (`PostConstructArea`,
+  `FillInStaticGeometry`). After the models: render octree, area surfaces, ambient lights.
+- **Vertex formats** (`CGraphics::SetDefaultVtxAttrFmt`): format 0 is float normals and UVs; 1 is
+  16-bit normals (14 fraction bits); 2 is that plus TEX0 as 16-bit lightmap UVs (15 fraction bits), which
+  a material with `kStateFlag_LightmapUvArray` (bit 13) switches TEX0 to (`CCubeMaterial::SetCurrent`).
+  A model's flag bit 0 means 16-bit normals (`CCubeModel::SetArraysCurrent`). So a model with a
+  packed-lightmap material gets 16-bit normals throughout, format 2 for those surfaces and 1 for the
+  rest; any other model is all floats, format 0. TEX1-7 share the one float UV array.
+- **Vertex descriptions** (`CGX::SetVtxDescv_Compressed`): POS, NRM, CLR0, CLR1, TEX0-6, two bits
+  each (none, direct, 8-bit index, 16-bit index); bits 24-31 are per-vertex matrix indices. The writer
+  refuses direct data, CLR1 (no CLR1 array is set), TEX7 (never set) and matrix indices.
+- **Surfaces** (`CCubeSurface`): a 0x30-byte header, then its bounds as 0x18 bytes of "extra" data,
+  padded to 32, then the display list. Without the bounds, `GetBounds` is a point at the centre and the
+  scan visor pass culls the surface. Display lists are `GX_TRIANGLES` with the format in the low bits,
+  padded to 32 bytes with `GX_NOP`.
+- **Records, groups and area surfaces** (`CCubeRenderer`, `CMetroidModelInstance`, `SAreaSurface`): a
+  surface's record names its area surface, by which the renderer picks its light set and visibility;
+  an area surface names a model and a surface group; groups list surfaces. Area surface entry 0 is a
+  placeholder (model and group -1); entry *k*+1 is area surface *k*. The writer gives every surface an
+  area surface and a group of its own (the finest lighting and visibility).
+- **Render octree** (`CAreaRenderOctTree`): bitmaps of area surfaces at byte 64, a node offset table,
+  nodes of a bitmap index, a split (0 leaf, 1/2/4 one axis, 3/5 two axes, 7 all three) and children.
+  The writer splits the axes at least half the longest one's length, and never uses split 6, whose axis
+  table in the game gives Z and X.
+
+`CAreaCooker` writes a room with replaced geometry (`CGameArea::ReplaceWorldGeometry`), collision
+(`ReplaceCollision`) or neither, renumbering every later section. Replacing the geometry clears the
+room's visibility (a PVS section of 64 bytes or less is ignored) and its static geometry map (EGMC ID
+-1), which both index the old surfaces; `SetClearPathOnCook` clears PATH as well.
+
+Tests (`ctest`): `WorldGeometryCookerTests.cpp` reads three rooms back through a transcription of the
+game's readers (section walk, material set, surfaces and display lists, records, groups, area
+surfaces, octree queries) and checks every triangle comes back with its positions, normals, colours and
+UVs, that every surface's own bounds and centre find it in the octree, and that no box across the room
+misses a surface it overlaps; four deliberately broken writers all fail it. `AreaCookerTests.cpp` cooks
+whole rooms (geometry, collision and PATH replaced; collision only; nothing) and walks them in the
+game's order. The port's independent Python reader reads the same output (`echoes_disc_room_geometry`
+and a fixture in its `tests/data`). **Not yet checked against the running game or retail data.**
+
+Values the game never reads, written as guesses: each record's first halfword (0), the area surfaces'
+last two shorts (0), the surfaces' matrix and shadow banks (0), the octree's first two words ('AROT', 1)
+and its nodes' second byte (0). `echoes_disc_room_geometry` on retail rooms shows what Retro wrote.
+
 ## Plan
 
 1. **Collision writer**: done, above.
-2. **World geometry writer**: world materials, models and their surfaces (GX display lists, which
-   `CModelCooker` already writes for Echoes CMDLs), the two per-model surface tables and the area
-   surface list (both read by `FillInStaticGeometry` and `CMetroidModelInstance`; some fields are still
-   unnamed in the decompilation, so the renderer that reads them is checked first), lights, and the
-   stub sections.
+2. **World geometry writer**: done, above, with the area cooker writing replaced geometry and
+   collision. Still to do: a light list writer (the room's own lights are kept today), and writing
+   materials from scratch instead of reusing a cooked set.
 3. **Replace a room's shape from a model file**: Assimp import (already in the Model Editor) gives world
    models and, from the same triangles, collision, with floor/wall/ceiling picked from each triangle's
    normal and a surface type the user chooses. Textures need a TXTR writer (`CTextureEncoder` only turns

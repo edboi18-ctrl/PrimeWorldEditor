@@ -8,6 +8,7 @@
 //  - PWE's own CCollisionLoader::LoadAreaCollision;
 //  - the rules CCollisionTracker relies on (edge numbering and neighbours).
 
+#include "TestLog.h"
 #include <Core/Resource/Cooker/CCollisionCooker.h>
 #include <Core/Resource/Factory/CCollisionLoader.h>
 #include <Core/Resource/Collision/CCollisionMeshGroup.h>
@@ -330,6 +331,7 @@ void CheckLimits()
 
 int main(int argc, char** argv)
 {
+    InitTestLog();
     if (argc == 3 && std::strcmp(argv[1], "--dump") == 0)
         gDumpDir = argv[2];
     CheckMesh("box room", BoxRoom(), {kFloor, kWall, kCeiling}, true, 1);

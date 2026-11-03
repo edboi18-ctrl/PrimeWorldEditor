@@ -47,8 +47,15 @@ class CAreaCooker
 
     std::vector<SCompressedBlock> mCompressedBlocks;
 
+    // The sections written: the area's original buffers, or a copy with replacements applied
+    // (ApplyReplacements). The header's model count comes with them.
+    const std::vector<std::vector<uint8_t>>* mpBuffers = nullptr;
+    std::vector<std::vector<uint8_t>> mReplacedBuffers;
+    uint32_t mModelCount = 0;
+
     CAreaCooker();
     void DetermineSectionNumbersPrime();
+    bool ApplyReplacements();
     void DetermineSectionNumbersCorruption();
 
     // Header
@@ -72,6 +79,8 @@ class CAreaCooker
 
 public:
     static bool CookMREA(CGameArea *pArea, IOutputStream& rOut);
+    /** The same for a given game (an area with no resource entry, as in tests/, reports none). */
+    static bool CookMREA(CGameArea *pArea, EGame Game, IOutputStream& rOut);
     static uint32_t GetMREAVersion(EGame Version);
 };
 

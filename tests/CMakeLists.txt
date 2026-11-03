@@ -3,3 +3,13 @@ add_executable(pwe_collision_cooker_tests CollisionCookerTests.cpp)
 target_compile_features(pwe_collision_cooker_tests PRIVATE cxx_std_23)
 target_link_libraries(pwe_collision_cooker_tests PRIVATE pwe_core)
 add_test(NAME collision_cooker COMMAND pwe_collision_cooker_tests)
+
+add_executable(pwe_world_geometry_cooker_tests WorldGeometryCookerTests.cpp)
+target_compile_features(pwe_world_geometry_cooker_tests PRIVATE cxx_std_23)
+target_link_libraries(pwe_world_geometry_cooker_tests PRIVATE pwe_core)
+add_test(NAME world_geometry_cooker COMMAND pwe_world_geometry_cooker_tests)
+
+add_executable(pwe_area_cooker_tests AreaCookerTests.cpp)
+target_compile_features(pwe_area_cooker_tests PRIVATE cxx_std_23)
+target_link_libraries(pwe_area_cooker_tests PRIVATE pwe_core)
+add_test(NAME area_cooker COMMAND pwe_area_cooker_tests)

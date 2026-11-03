@@ -3,7 +3,9 @@
 #include "Core/CompressionUtil.h"
 #include "Core/GameProject/DependencyListBuilders.h"
 #include "Core/Resource/Area/CGameArea.h"
+#include "Core/Resource/Cooker/CCollisionCooker.h"
 #include "Core/Resource/Cooker/CScriptCooker.h"
+#include <Common/Log.h>
 
 constexpr bool gkForceDisableCompression = false;
 
@@ -85,16 +87,88 @@ void CAreaCooker::DetermineSectionNumbersCorruption()
     }
 }
 
+bool CAreaCooker::ApplyReplacements()
+{
+    const auto& Original = mpArea->mSectionDataBuffers;
+    mpBuffers = &Original;
+    mModelCount = mpArea->mOriginalWorldMeshCount;
+
+    const bool Geometry = mpArea->HasReplacedWorldGeometry();
+    const bool Collision = mpArea->HasReplacedCollision();
+    if (!Geometry && !Collision && !mpArea->mClearPathOnCook)
+        return true;
+    if (mVersion != EGame::Echoes)
+    {
+        NLog::Error("Replacing a room's geometry, collision or pathfinding is only supported for Echoes");
+        return false;
+    }
+    if (mSCLYSecNum > Original.size() || mEGMCSecNum >= Original.size())
+    {
+        NLog::Error("The area's original sections do not match its section numbers; cannot replace them");
+        return false;
+    }
+
+    // Geometry is everything before the first script layer: materials, models, the render octree,
+    // the area surface list and the ambient light table (CGameArea::PostConstructArea's order).
+    mReplacedBuffers.clear();
+    if (Geometry)
+        mReplacedBuffers = mpArea->mReplacementGeometrySections;
+    else
+        mReplacedBuffers.assign(Original.begin(), Original.begin() + mSCLYSecNum);
+    const int64_t Delta = int64_t(mReplacedBuffers.size()) - int64_t(mSCLYSecNum);
+    mReplacedBuffers.insert(mReplacedBuffers.end(), Original.begin() + mSCLYSecNum, Original.end());
+
+    for (uint32_t* pNum : {&mSCLYSecNum, &mSCGNSecNum, &mCollisionSecNum, &mUnknownSecNum, &mLightsSecNum,
+                           &mVISISecNum, &mPATHSecNum, &mPTLASecNum, &mEGMCSecNum})
+        *pNum = static_cast<uint32_t>(int64_t(*pNum) + Delta);
+    if (Geometry)
+    {
+        mFFFFSecNum = mSCLYSecNum - 1;   // the section before the first layer (the header word the game
+        mModelCount = mpArea->mReplacementWorldModelCount;   // reads as the render octree's, != -1)
+    }
+
+    auto AssetIDSection = [](uint32_t ID) {
+        std::vector<uint8_t> Out(32, 0);
+        for (int i = 0; i < 4; i++)
+            Out[i] = uint8_t(ID >> (24 - 8 * i));
+        return Out;
+    };
+    if (Geometry)
+    {
+        // Both index the old surfaces. A PVS section of 64 bytes or less is ignored, and an EGMC ID
+        // of -1 is not loaded (PostConstructArea).
+        mReplacedBuffers[mVISISecNum].assign(32, 0);
+        mReplacedBuffers[mEGMCSecNum] = AssetIDSection(0xFFFFFFFF);
+    }
+    if (mpArea->mClearPathOnCook)
+        mReplacedBuffers[mPATHSecNum] = AssetIDSection(0xFFFFFFFF);
+    if (Collision)
+    {
+        CVectorOutStream Section(std::endian::big);
+        std::string Error;
+        if (!CCollisionCooker::WriteAreaCollisionSection(*mpArea->mpReplacementCollision, Section, mVersion, {}, &Error))
+        {
+            NLog::Error("Cannot cook the replacement collision: {}", Error);
+            return false;
+        }
+        Section.WriteToBoundary(32, 0);
+        const auto* pData = static_cast<const uint8_t*>(Section.Data());
+        mReplacedBuffers[mCollisionSecNum].assign(pData, pData + Section.Size());
+    }
+    mpBuffers = &mReplacedBuffers;
+    return true;
+}
+
 // ************ HEADER ************
 void CAreaCooker::WritePrimeHeader(IOutputStream& rOut)
 {
     rOut.WriteU32(0xDEADBEEF);
     rOut.WriteU32(GetMREAVersion(mVersion));
     mpArea->mTransform.Write(rOut);
-    rOut.WriteU32(mpArea->mOriginalWorldMeshCount);
+    rOut.WriteU32(mModelCount);
     if (mVersion >= EGame::Echoes)
         rOut.WriteU32(static_cast<uint32_t>(mpArea->mScriptLayers.size()));
-    rOut.WriteU32(static_cast<uint32_t>(mpArea->mSectionDataBuffers.size()));
+    rOut.WriteU32(static_cast<uint32_t>(mpBuffers->size()));
 
     rOut.WriteU32(mGeometrySecNum);
     rOut.WriteU32(mSCLYSecNum);
@@ -387,14 +461,23 @@ void CAreaCooker::FinishBlock()
 // ************ STATIC ************
 bool CAreaCooker::CookMREA(CGameArea *pArea, IOutputStream& rOut)
 {
+    return CookMREA(pArea, pArea->Game(), rOut);
+}
+
+bool CAreaCooker::CookMREA(CGameArea *pArea, EGame Game, IOutputStream& rOut)
+{
     CAreaCooker Cooker;
     Cooker.mpArea = pArea;
-    Cooker.mVersion = pArea->Game();
+    Cooker.mVersion = Game;
 
     if (Cooker.mVersion <= EGame::Echoes)
         Cooker.DetermineSectionNumbersPrime();
     else
         Cooker.DetermineSectionNumbersCorruption();
+
+    if (!Cooker.ApplyReplacements())
+        return false;
+    const auto& Buffers = *Cooker.mpBuffers;
 
     // Write pre-SCLY data sections
     for (uint32_t iSec = 0; iSec < Cooker.mSCLYSecNum; iSec++)
@@ -404,7 +487,7 @@ bool CAreaCooker::CookMREA(CGameArea *pArea, IOutputStream& rOut)
 
         else
         {
-            Cooker.mSectionData.WriteBytes(pArea->mSectionDataBuffers[iSec].data(), pArea->mSectionDataBuffers[iSec].size());
+            Cooker.mSectionData.WriteBytes(Buffers[iSec].data(), Buffers[iSec].size());
             Cooker.FinishSection(false);
         }
     }
@@ -417,7 +500,7 @@ bool CAreaCooker::CookMREA(CGameArea *pArea, IOutputStream& rOut)
 
     // Write post-SCLY data sections
     const uint32_t PostSCLY = (Cooker.mVersion <= EGame::Prime ? Cooker.mSCLYSecNum + 1 : Cooker.mSCGNSecNum + 1);
-    for (size_t iSec = PostSCLY; iSec < pArea->mSectionDataBuffers.size(); iSec++)
+    for (size_t iSec = PostSCLY; iSec < Buffers.size(); iSec++)
     {
         if (iSec == Cooker.mModulesSecNum)
         {
@@ -425,7 +508,7 @@ bool CAreaCooker::CookMREA(CGameArea *pArea, IOutputStream& rOut)
         }
         else
         {
-            Cooker.mSectionData.WriteBytes(pArea->mSectionDataBuffers[iSec].data(), pArea->mSectionDataBuffers[iSec].size());
+            Cooker.mSectionData.WriteBytes(Buffers[iSec].data(), Buffers[iSec].size());
             Cooker.FinishSection(false);
         }
     }

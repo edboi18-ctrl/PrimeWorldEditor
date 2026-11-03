@@ -135,20 +135,48 @@ Values the game never reads, written as guesses: each record's first halfword (0
 last two shorts (0), the surfaces' matrix and shadow banks (0), the octree's first two words ('AROT', 1)
 and its nodes' second byte (0). `echoes_disc_room_geometry` on retail rooms shows what Retro wrote.
 
+## Building a room in Blender (done)
+
+`tools/blender/io_echoes_room` is a Blender add-on (README beside it) that does step 3 below from
+Blender instead of an Assimp import: model the room, give each material a look, mark what is solid,
+and build. It writes the room and its new textures into the port's mods folder. It has its own Python
+copies of the geometry and collision writers above (`geometry.py`, `collision.py`), plus what the C++
+side does not have yet:
+
+- **Materials from scratch** (`materials.py`): five templates (Lit, Lightmapped, Cutout, Unlit,
+  Additive) laid out as `CCubeMaterial::SetCurrent` reads them. Lightmapped copies the pattern the port's
+  scan of retail materials found (`port_pbr_rules.h`): stage 0 multiplies the lightmap by TEV colour
+  register 1 (the world light colour, which `CCubeRenderer::SetupRendererStates` puts there) and adds the
+  lit channel into register 0; stage 1 multiplies that by the diffuse texture. Cutout sets
+  `kStateFlag_AlphaTest`, which the game turns into alpha >= 64 (`CCubeMaterial.cpp`, `SetAlphaCompare`).
+  Retail materials can be reused as they are, with any of their textures swapped.
+- **A TXTR writer** (`txtr.py`): RGBA8 with mipmaps, in GX's tiling (4 x 4 tiles, alpha and red in one
+  32-byte half, green and blue in the other). The reader decodes every format, for the reference import.
+- **Reading a retail room into Blender** (`room_reader.py`): materials, models, UVs and textures, as a
+  reference to build against.
+
+The built room is checked by this repo's C++ tests: `pwe_world_geometry_cooker_tests --check-mrea`
+reads it through the game-reader transcription and through PWE's own `CMaterialLoader` and
+`CCollisionLoader` (each material's pass count must equal its TEV stage count). **Not yet checked in
+the running game.** It also does not reach the World Editor yet: the editor shows rooms from its
+project, and the add-on writes to the port's mods folder.
+
 ## Plan
 
 1. **Collision writer**: done, above.
 2. **World geometry writer**: done, above, with the area cooker writing replaced geometry and
    collision. Still to do: a light list writer (the room's own lights are kept today), and writing
-   materials from scratch instead of reusing a cooked set.
+   materials from scratch in C++ (the Blender add-on's templates do it in Python).
 3. **Replace a room's shape from a model file**: Assimp import (already in the Model Editor) gives world
    models and, from the same triangles, collision, with floor/wall/ceiling picked from each triangle's
    normal and a surface type the user chooses. Textures need a TXTR writer (`CTextureEncoder` only turns
    DXT1 into CMPR today). The room keeps its asset ID, so the port loads it as a loose mod file, the same
-   way it loads any replaced resource.
+   way it loads any replaced resource. **Done from Blender** (above); still to do in the editor itself,
+   along with opening a built room in a PWE project so the World Editor shows it.
 4. **New rooms in a world**: add an area to an MLVL (transform, bounds, docks and their portal corners,
    modules, layers, map), and the doors that join it to its neighbours. On the port side, loose
-   resources with new asset IDs (today the port only replaces IDs a PAK already holds).
+   resources with new asset IDs are done: one in a folder named after a disc PAK is added to that PAK
+   (port `docs/MODS.md`); the add-on's new textures use it.
 5. **Check against real rooms** (with the user's disc): load every retail room's collision, cook it
    again and compare the triangles; then put recooked rooms in the port's mods folder and walk them
    with the port's area sweep.

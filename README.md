@@ -2,6 +2,11 @@
 Prime World Editor is a custom editor suite for Retro Studios' GameCube and Wii games, including the
 Metroid Prime series and Donkey Kong Country Returns.
 
+This fork adds tools for building Metroid Prime 2: Echoes rooms for the native port
+([MetroidPrime2Port](https://github.com/edboi18-ctrl/MetroidPrime2Port)): Echoes geometry and collision
+cookers (`docs/ECHOES_ROOMS.md`) and a Blender add-on that models a room, gives its surfaces Echoes
+materials and builds it into the port's mods folder (`tools/blender/README.md`).
+
 # Clone Submodules First!
 
 Builders on all platforms should ensure submodules are up to date with the current PrimeWorldEditor

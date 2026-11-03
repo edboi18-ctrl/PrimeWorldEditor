@@ -1,6 +1,6 @@
 [submodule "externals/LibCommon"]
 	path = externals/LibCommon
-	url = ../LibCommon.git
+	url = https://github.com/AxioDL/LibCommon.git
 [submodule "templates"]
 	path = templates
 	url = https://github.com/PrimeDecomp/retro-script-object-templates.git

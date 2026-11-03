@@ -9,6 +9,16 @@
 
 #include "TestLog.h"
 #include <Core/Resource/Cooker/CWorldGeometryCooker.h>
+#include <Core/GameProject/CResourceStore.h>
+#include <Core/Resource/CMaterial.h>
+#include <Core/Resource/CMaterialSet.h>
+#include <Core/Resource/Collision/CCollisionMeshGroup.h>
+#include <Core/Resource/Factory/CCollisionLoader.h>
+#include <Core/Resource/Factory/CMaterialLoader.h>
+#include <Common/FileIO/CMemoryInStream.h>
+
+#include <fstream>
+#include <iterator>
 
 #include <algorithm>
 #include <cmath>
@@ -544,11 +554,141 @@ void CheckRefusals(const std::vector<uint8_t>& Set)
     std::vector<Cooker::SMaterialInfo> Info;
     CHECK(!Cooker::ParseMaterialSet({0, 0, 0, 9}, Info, &Error));
 }
+
+// ---------------------------------------------------------------------------- --check-mrea
+// A room cooked elsewhere (the Blender add-on's Python writers): its geometry through EngineRead, its
+// materials through PWE's own loader (what the World Editor shows), its collision through PWE's loader.
+uint32_t BE32(const std::vector<uint8_t>& B, size_t At)
+{
+    return uint32_t(B[At]) << 24 | uint32_t(B[At + 1]) << 16 | uint32_t(B[At + 2]) << 8 | B[At + 3];
+}
+
+/** The TEV stage count of a material, walking its header as CCubeMaterial::SetCurrent does. */
+uint32_t TevCount(const std::vector<uint8_t>& M)
+{
+    size_t p = 0;
+    const uint32_t Flags = BE32(M, p); p += 4;
+    const uint32_t Tex = BE32(M, p); p += 4 + 4 * Tex;
+    p += 16;                                     // vertex description, two Echoes words, group
+    if (Flags & 0x8) p += 4 + 4 * BE32(M, p);    // konst colours
+    p += 4;                                      // blend
+    if (Flags & 0x400) p += 4;                   // indirect texture slot
+    p += 4 + 4 * BE32(M, p);                     // colour channels
+    return BE32(M, p);
+}
+
+int CheckMrea(const char* Path)
+{
+    std::ifstream In(Path, std::ios::binary);
+    const std::vector<uint8_t> File((std::istreambuf_iterator<char>(In)), std::istreambuf_iterator<char>());
+    CHECK(File.size() >= 0x80 && BE32(File, 0) == 0xDEADBEEF && BE32(File, 4) == 0x19);
+    if (gFailures) return 1;
+    std::vector<uint32_t> H;
+    for (int i = 0; i < 29; i++) H.push_back(BE32(File, 4 * i));
+    const uint32_t Count = H[16], Blocks = H[28];
+    size_t Pos = 0x80;
+    std::vector<uint32_t> Sizes;
+    for (uint32_t i = 0; i < Count; i++) Sizes.push_back(BE32(File, Pos + 4 * i));
+    Pos += (Count * 4 + 31) & ~31u;
+    std::vector<std::vector<uint8_t>> Sections;
+    const size_t TableAt = Pos;
+    Pos += (Blocks * 16 + 31) & ~31u;
+    for (uint32_t b = 0; b < Blocks; b++)
+    {
+        const uint32_t Buf = BE32(File, TableAt + 16 * b), Compressed = BE32(File, TableAt + 16 * b + 8), SecCount = BE32(File, TableAt + 16 * b + 12);
+        CHECK(Compressed == 0);   // the add-on writes stored blocks
+        size_t At = Pos;
+        for (uint32_t i = 0; i < SecCount; i++)
+        {
+            const uint32_t Size = Sizes[Sections.size()];
+            Sections.emplace_back(File.begin() + At, File.begin() + At + Size);
+            At += Size;
+        }
+        Pos += (Buf + 31) & ~31u;
+    }
+    CHECK(Sections.size() == Count);
+    if (gFailures) return 1;
+
+    const std::vector<std::vector<uint8_t>> Geometry(Sections.begin() + H[17], Sections.begin() + H[18]);
+    const SEngine E = EngineRead(Geometry, H[14]);
+    CHECK(E.Ok);
+    if (!E.Ok) return 1;
+    size_t AreaCount = 0;
+    for (const auto& M : E.Models) AreaCount += M.Surfaces.size();
+    CHECK(E.AreaSurfaces.size() == AreaCount + 1 && E.MeshCount == AreaCount);
+    CHECK(E.AreaSurfaces[0].Model == -1 && E.AreaSurfaces[0].Group == -1);
+    std::vector<int> Seen(AreaCount, 0);
+    size_t Triangles = 0;
+    for (size_t m = 0; m < E.Models.size(); m++)
+    {
+        const auto& Model = E.Models[m];
+        for (size_t s = 0; s < Model.Surfaces.size(); s++)
+        {
+            const auto& S = Model.Surfaces[s];
+            Triangles += S.Corners.size() / 3;
+            for (const auto& C : S.Corners) { CHECK(Contains(S.Bounds, C.Position)); CHECK(Contains(Model.Bounds, C.Position)); }
+            const uint16_t Area = Model.Records[s * 2 + 2];
+            CHECK(Area < AreaCount);
+            if (Area >= AreaCount) continue;
+            Seen[Area]++;
+            const SAreaSurf& A = E.AreaSurfaces[Area + 1];
+            CHECK(A.Model == int16_t(m) && Inside(S.Bounds, A.Bounds));
+            const auto& G = Model.Groups;
+            const uint16_t GroupCount = G[0];
+            CHECK(A.Group >= 0 && A.Group < GroupCount);
+            if (A.Group < 0 || A.Group >= GroupCount) continue;
+            const uint16_t N = A.Group == 0 ? G[1] : G[A.Group + 1] - G[A.Group];
+            const uint16_t Start = A.Group == 0 ? 0 : G[A.Group];
+            bool Listed = false;
+            for (uint16_t i = 0; i < N; i++) Listed |= G[GroupCount + 1 + Start + i] == s;
+            CHECK(Listed);
+            for (const CAABox& Test : {A.Bounds, CAABox(S.Center, S.Center)})
+                CHECK(E.Query(Test)[Area / 32] & (1u << (Area % 32)));
+        }
+    }
+    for (int v : Seen) CHECK(v == 1);
+
+    // Materials through PWE's loader, with an empty resource store (textures load as null).
+    // Never destroyed: ~CResourceStore closes a project, which a store made from a database path has not.
+    static CResourceStore* pStore = new CResourceStore("/nonexistent-pwe-check/store.rdb");
+    CMemoryInStream MatIn(Geometry[0].data(), uint32_t(Geometry[0].size()), std::endian::big);
+    std::unique_ptr<CMaterialSet> pSet(CMaterialLoader::LoadMaterialSet(MatIn, EGame::Echoes, pStore));
+    const uint32_t TexCount = BE32(Geometry[0], 0);
+    const uint32_t MatCount = BE32(Geometry[0], 4 + 4 * TexCount);
+    CHECK(pSet && pSet->NumMaterials() == MatCount);
+    if (pSet)
+    {
+        const size_t Base = 8 + 4 * TexCount + 4 * MatCount;
+        uint32_t Start = 0;
+        for (uint32_t i = 0; i < MatCount && i < pSet->NumMaterials(); i++)
+        {
+            const uint32_t End = BE32(Geometry[0], 8 + 4 * TexCount + 4 * i);
+            const std::vector<uint8_t> M(Geometry[0].begin() + Base + Start, Geometry[0].begin() + Base + End);
+            const CMaterial* pMat = pSet->MaterialByIndex(i, false);
+            CHECK(pMat && std::ranges::size(pMat->Passes()) == TevCount(M));
+            CHECK(pMat && pMat->VtxDesc().HasFlag(EVertexAttribute::Position));
+            Start = End;
+        }
+    }
+
+    // Collision through PWE's loader.
+    const auto& Coll = Sections[H[20]];
+    CMemoryInStream CollIn(Coll.data(), uint32_t(Coll.size()), std::endian::big);
+    auto pGroup = CCollisionLoader::LoadAreaCollision(CollIn);
+    CHECK(pGroup != nullptr);
+    size_t CollTris = pGroup ? (*pGroup->Meshes().begin())->GetIndexData().TriangleIndices.size() / 3 : 0;
+
+    std::fprintf(stderr, "%s: %zu models, %zu surfaces, %zu triangles, %u materials, %zu collision triangles: %s\n", Path,
+                 E.Models.size(), AreaCount, Triangles, MatCount, CollTris, gFailures ? "FAILED" : "ok");
+    return gFailures ? 1 : 0;
+}
 }
 
 int main(int argc, char** argv)
 {
     InitTestLog();
+    if (argc == 3 && std::strcmp(argv[1], "--check-mrea") == 0)
+        return CheckMrea(argv[2]);
     const auto Set = MaterialSet({Material(0x4082, kDescPosNrmTex0),
                                   Material(0x4082 | (1u << 13) | (1u << 11), kDescLightmapped),
                                   Material(0x4082, kDescPosNrm)},

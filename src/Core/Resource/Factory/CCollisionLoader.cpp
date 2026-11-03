@@ -42,9 +42,15 @@ CCollisionLoader::CCollisionLoader() = default;
 void CCollisionLoader::LoadCollisionMaterial(IInputStream& Src, CCollisionMaterial& OutMaterial)
 {
     const uint64_t RawFlags = mVersion <= EGame::Prime ? Src.ReadU32() : Src.ReadU64();
+    DecodeMaterial(RawFlags, mVersion, OutMaterial);
+}
+
+void CCollisionLoader::DecodeMaterial(uint64_t RawFlags, EGame Game, CCollisionMaterial& OutMaterial)
+{
+    OutMaterial = CCollisionMaterial();
     OutMaterial.mRawFlags = RawFlags;
 
-    if (mVersion <= EGame::Prime)
+    if (Game <= EGame::Prime)
     {
         if ((RawFlags & 0x00000001) != 0) OutMaterial |= eCF_Unknown;
         if ((RawFlags & 0x00000002) != 0) OutMaterial |= eCF_Stone;
@@ -72,7 +78,7 @@ void CCollisionLoader::LoadCollisionMaterial(IInputStream& Src, CCollisionMateri
         if ((RawFlags & 0x40000000) != 0) OutMaterial |= eCF_Wall;
         if ((RawFlags & 0x80000000) != 0) OutMaterial |= eCF_Floor;
     }
-    else if (mVersion <= EGame::Corruption)
+    else if (Game <= EGame::Corruption)
     {
         if ((RawFlags & 0x00000001) != 0) OutMaterial |= eCF_Unknown;
         if ((RawFlags & 0x00000002) != 0) OutMaterial |= eCF_Stone;
@@ -105,7 +111,7 @@ void CCollisionLoader::LoadCollisionMaterial(IInputStream& Src, CCollisionMateri
         if ((RawFlags & 0x0001000000000000) != 0) OutMaterial |= eCF_AiBlock;
         if ((RawFlags & 0x0400000000000000) != 0) OutMaterial |= eCF_JumpNotAllowed;
     }
-    else if (mVersion == EGame::DKCReturns)
+    else if (Game == EGame::DKCReturns)
     {
         if ((RawFlags & 0x10000000) != 0) OutMaterial |= eCF_FlippedTri;
     }
@@ -153,11 +159,16 @@ void CCollisionLoader::LoadCollisionIndices(IInputStream& File, SCollisionIndexD
         triangle = File.ReadU16();
     }
 
-    // Echoes introduces a new data chunk; don't know what it is yet, skipping for now
+    // Echoes adds each triangle's neighbours across its three edges (SCollisionIndexData::TriangleNeighbors)
     if (mVersion >= EGame::Echoes)
     {
-        const auto UnknownCount = File.ReadU32();
-        File.Skip(UnknownCount * 2);
+        const auto NeighborCount = File.ReadU32();
+        OutData.TriangleNeighbors.resize(NeighborCount);
+
+        for (auto& neighbor : OutData.TriangleNeighbors)
+        {
+            neighbor = File.ReadU16();
+        }
     }
 
     // Vertices

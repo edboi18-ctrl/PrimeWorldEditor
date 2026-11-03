@@ -14,7 +14,10 @@ struct SCollisionIndexData
     std::vector<uint8_t>            TriangleMaterialIndices;
     std::vector<uint16_t>           EdgeIndices;
     std::vector<uint16_t>           TriangleIndices;
-    std::vector<uint16_t>           UnknownData;
+    /** Echoes+: per triangle, the triangle across each of its three edges (TriangleIndices order),
+     *  0xFFFF for none. The game reads it as GetTriangleNeighbors (CCollisionTracker, which the Ing
+     *  use to crawl over surfaces). */
+    std::vector<uint16_t>           TriangleNeighbors;
     std::vector<CVector3f>          Vertices;
 };
 

@@ -52,6 +52,7 @@ AXIO_DEFINE_ENUM_OPS(ECollisionFlag)
 class CCollisionMaterial : public TFlags<ECollisionFlag>
 {
     friend class CCollisionLoader;
+    friend class CCollisionCooker;
     uint64_t mRawFlags = 0;
 
 public:

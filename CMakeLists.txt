@@ -35,6 +35,7 @@ set(tinyxml2_BUILD_TESTING OFF)
 set(BUILD_SHARED_LIBS OFF)
 
 set(ZLIB_BUILD_EXAMPLES OFF)
+set(ZLIB_BUILD_TESTING OFF)  # keep zlib's tests out of our ctest
 set(ZLIB_LIBRARY zlibstatic)
 FetchContent_Declare(
   zlib
@@ -138,3 +139,9 @@ add_subdirectory(externals/LibCommon)
 
 add_subdirectory(src/Core)
 add_subdirectory(src/Editor)
+
+option(PWE_BUILD_TESTS "Build the pwe_core tests (tests/, run with ctest)" ON)
+if (PWE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

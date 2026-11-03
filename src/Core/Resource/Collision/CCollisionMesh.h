@@ -9,6 +9,7 @@
 class CCollisionMesh
 {
     friend class CCollisionLoader;
+    friend class CCollisionCooker;
 
 protected:
     CAABox                  mAABox;

@@ -139,7 +139,8 @@ def build(inp: BuildInput) -> BuildOutput:
             for role in roles:
                 image = m.images.get(role) or (m.images.get("diffuse") if role == "glow" else None)
                 if image is None:
-                    raise BuildError(f"material {m.name!r} ({m.template}) needs a {role} image")
+                    raise BuildError(f"material {m.name!r} ({m.template}) needs a {role} image: set it in Material "
+                                     "Properties > Echoes Material (or hide the objects that use it)")
                 ids.append(texture_for(image))
             body = mats.retexture(mat.to_bytes(), ids, set_ids, i)
         elif m.kind == "DISC":

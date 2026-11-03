@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 130
+# Blender declares properties as annotations (name: StringProperty(name="...")), whose string
+# arguments pyflakes reads as forward references.
+per-file-ignores = io_echoes_room/ui.py:F722,F821
+exclude = __pycache__

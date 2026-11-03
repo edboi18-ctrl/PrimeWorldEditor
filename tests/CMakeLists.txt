@@ -31,3 +31,20 @@ if (Python3_Interpreter_FOUND)
         message(STATUS "numpy not found: the Blender add-on tests are skipped")
     endif()
 endif()
+
+# The add-on inside Blender, end to end (tools/blender/tests/test_blender.py), with the C++ check of
+# the room it builds: through Blender's Python module when Python can import bpy, or through a Blender
+# executable given as PWE_BLENDER_EXECUTABLE.
+set(PWE_BLENDER_EXECUTABLE "" CACHE FILEPATH "Blender, for the add-on's end-to-end test")
+set(PWE_ADDON_BLENDER_TEST ${PROJECT_SOURCE_DIR}/tools/blender/tests/test_blender.py)
+if (PWE_BLENDER_EXECUTABLE)
+    add_test(NAME blender_addon_in_blender
+             COMMAND ${PWE_BLENDER_EXECUTABLE} -b --factory-startup --python-exit-code 1 --python ${PWE_ADDON_BLENDER_TEST}
+                     -- --check $<TARGET_FILE:pwe_world_geometry_cooker_tests>)
+elseif (Python3_Interpreter_FOUND)
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import bpy" RESULT_VARIABLE PWE_HAVE_BPY OUTPUT_QUIET ERROR_QUIET)
+    if (PWE_HAVE_BPY EQUAL 0)
+        add_test(NAME blender_addon_in_blender
+                 COMMAND ${Python3_EXECUTABLE} ${PWE_ADDON_BLENDER_TEST} --check $<TARGET_FILE:pwe_world_geometry_cooker_tests>)
+    endif()
+endif()

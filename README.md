@@ -14,7 +14,7 @@ by running `git submodule update --init --recursive`.
 **64-bit Note:** Except for Visual Studio and the Qt installer, ensure 64-bit (x86-64, x64) packages are installed.
 
 * [Visual Studio 2026](https://visualstudio.microsoft.com/vs/) (Desktop development with C++)
-* [Qt 6.5+](https://www.qt.io/development/download-qt-installer-oss) (MSVC 2022 64-bit specification)
+* [Qt 6.7+](https://www.qt.io/development/download-qt-installer-oss) (MSVC 2022 64-bit specification). 6.7 is the first with the `QMetaObject::invokeMethod` overloads the editor calls.
   * Yes, MSVC 2022, since a Qt version with MSVC 2026 libs isn't provided yet as of writing. The ABI is still stable nonetheless.
 
 ## Build using Qt Creator
@@ -65,7 +65,7 @@ Note that nothing is wrong if the CMake step is taking longer than usual. It's l
 ## Requirements
 
 * [Xcode 10.2+](https://developer.apple.com/xcode/)
-* [Qt 6.5+](https://www.qt.io/development/download-qt-installer-oss) (macOS specification)
+* [Qt 6.7+](https://www.qt.io/development/download-qt-installer-oss) (macOS specification)
 * *cmake* and *ninja* installed using [Homebrew](https://brew.sh/)
 
 ## Build using Xcode
@@ -90,8 +90,8 @@ Note that nothing is wrong if the CMake step is taking longer than usual. It's l
 
 ## Requirements
 
-* A working compiler toolchain (GCC or Clang)
-* *cmake*, *ninja*, *qt6* (dev)
+* A C++23 compiler: GCC 14+ or Clang 18+ (GCC 13 lacks explicit object parameters)
+* *cmake*, *ninja*, *qt6* (dev) 6.7 or newer, OpenGL and GLU headers (`libgl-dev`, `libglu1-mesa-dev` on Ubuntu)
 
 ## Build using Command Line
 

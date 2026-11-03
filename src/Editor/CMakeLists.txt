@@ -42,6 +42,11 @@ endif()
 if (PWE_WC_DESCRIBE)
     string(REGEX REPLACE "v([0-9]+)\.([0-9]+)\.([0-9]+)\-([0-9]+).*" "\\1.\\2.\\3.\\4" PWE_VERSION_STRING "${PWE_WC_DESCRIBE}")
     string(REGEX REPLACE "v([0-9]+)\.([0-9]+)\.([0-9]+).*" "\\1.\\2.\\3" PWE_VERSION_STRING "${PWE_VERSION_STRING}")
+    # A clone without tags (shallow, or a fork made without them) describes as a bare commit hash,
+    # which project(VERSION) rejects.
+    if (NOT PWE_VERSION_STRING MATCHES "^[0-9]+(\\.[0-9]+)*$")
+        set(PWE_VERSION_STRING "0.0.0")
+    endif()
 else()
     set(PWE_WC_DESCRIBE "UNKNOWN-VERSION")
     set(PWE_VERSION_STRING "0.0.0")

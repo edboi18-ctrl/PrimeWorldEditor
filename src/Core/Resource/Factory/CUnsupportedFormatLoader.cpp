@@ -68,7 +68,7 @@ std::unique_ptr<CAudioMacro> CUnsupportedFormatLoader::LoadCAUD(IInputStream& rC
         std::list<CAssetID> AssetList;
         PerformCheating(rCAUD, pEntry->Game(), AssetList, pEntry->ResourceStore());
 
-        pMacro->mSamples.append_range(AssetList);
+        pMacro->mSamples.insert(pMacro->mSamples.end(), AssetList.begin(), AssetList.end());
         return pMacro;
     }
 
